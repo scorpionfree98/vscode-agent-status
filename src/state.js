@@ -100,15 +100,30 @@ function selectForTty(states, workspaceRoots, tty) {
 
 function latestTurnLifecycle(text, afterTimestamp) {
   let latest;
+  let latestMs;
+  const afterMs = Date.parse(afterTimestamp || '');
   for (const line of String(text || '').split('\n')) {
     if (!line.trim()) continue;
     try {
       const record = JSON.parse(line);
       const event = record?.type === 'event_msg' ? record.payload?.type : undefined;
       if (event !== 'turn_aborted') continue;
-      if (afterTimestamp && String(record.timestamp || '') <= String(afterTimestamp)) continue;
-      if (!latest || String(record.timestamp || '') > latest.timestamp) {
-        latest = { status: 'interrupted', timestamp: String(record.timestamp || '') };
+      const timestamp = String(record.timestamp || '');
+      const timestampMs = Date.parse(timestamp);
+      if (afterTimestamp) {
+        const after = Number.isFinite(timestampMs) && Number.isFinite(afterMs)
+          ? timestampMs > afterMs
+          : timestamp > String(afterTimestamp);
+        if (!after) continue;
+      }
+      const isNewer = !latest || (
+        Number.isFinite(timestampMs) && Number.isFinite(latestMs)
+          ? timestampMs > latestMs
+          : timestamp > latest.timestamp
+      );
+      if (isNewer) {
+        latest = { status: 'interrupted', timestamp };
+        latestMs = timestampMs;
       }
     } catch (_) { /* incomplete transcript line */ }
   }

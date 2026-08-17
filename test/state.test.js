@@ -53,6 +53,18 @@ test('detects aborted turns after the last hook update', () => {
   });
 });
 
+test('abort detection compares timestamps by instant rather than ISO text order', () => {
+  const transcript = JSON.stringify({
+    timestamp: '2026-01-01T00:30:00Z',
+    type: 'event_msg',
+    payload: { type: 'turn_aborted' },
+  });
+  assert.equal(
+    latestTurnLifecycle(transcript, '2026-01-01T01:00:00+01:00').status,
+    'interrupted',
+  );
+});
+
 test('running sessions become stale after the configured threshold', () => {
   const state = { status: 'running', unread: false, updatedAt: '2026-01-01T00:00:00Z' };
   assert.equal(withStaleStatus(state, Date.parse('2026-01-01T00:29:00Z'), 30 * 60_000).status, 'running');

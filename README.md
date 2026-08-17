@@ -19,7 +19,7 @@
 
 ## 数据协议
 
-Codex/Claude Code Hook 将状态原子写入远端主机的 `~/.agent-status/*.json`。扩展声明为 workspace extension，因此在 Remote SSH 场景下运行于远端，并直接监听该目录。
+Codex/Claude Code Hook 将状态原子写入远端主机的 `~/.agent-status/*.json`。扩展把已读信息写入独立的 `*.json.read` 回执，避免已读操作覆盖 Hook 同时写入的新状态。扩展声明为 workspace extension，因此在 Remote SSH 场景下运行于远端，并直接监听该目录。
 
 ## 命令
 

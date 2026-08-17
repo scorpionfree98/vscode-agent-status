@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.3.1
+
+- Prevent window focus from marking a non-active terminal session read.
+- Store read receipts separately so an older UI action cannot overwrite a newer hook transition.
+- Compare transcript lifecycle timestamps by instant across timezone offsets.
+- Add controller, hook integration, process-context, race, permission, and filesystem safety tests.
+
 ## 0.3.0
 
 - Bind Codex IDE sessions to their VS Code IPC context when available, with Extension Host and workspace fallbacks.

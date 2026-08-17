@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -88,6 +89,59 @@ class HookTests(unittest.TestCase):
                     "cwd": "/work/repo",
                 }, root)
             self.assertEqual(completed["terminalTty"], "/dev/pts/42")
+
+    def test_all_attention_and_lifecycle_events_have_expected_read_state(self):
+        cases = [
+            ({"hook_event_name": "UserPromptSubmit"}, "running", False),
+            ({"hook_event_name": "PermissionRequest"}, "waiting_permission", True),
+            ({"hook_event_name": "PreToolUse", "tool_name": "request_user_input"}, "waiting_input", True),
+            ({"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion"}, "waiting_input", True),
+            ({"hook_event_name": "Notification", "notification_type": "permission_prompt"}, "waiting_permission", True),
+            ({"hook_event_name": "Notification", "notification_type": "idle_prompt"}, "waiting_input", True),
+            ({"hook_event_name": "PostToolUse"}, "running", False),
+            ({"hook_event_name": "Stop"}, "completed", True),
+            ({"type": "agent-turn-complete"}, "completed", True),
+            ({"hook_event_name": "SessionEnd"}, "session_ended", False),
+        ]
+        for payload, expected_status, expected_unread in cases:
+            with self.subTest(payload=payload):
+                status, unread, _ = HOOK.event_status("codex", payload)
+                self.assertEqual(status, expected_status)
+                self.assertEqual(unread, expected_unread)
+
+    def test_atomic_state_write_has_private_mode_and_no_temporary_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = HOOK.update_state("codex", {
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": "../../unsafe/session",
+                "cwd": "/work/repo",
+                "prompt": "test atomic output",
+            }, root)
+            files = list(root.iterdir())
+            self.assertEqual(len(files), 1)
+            self.assertTrue(files[0].name.startswith("codex-"))
+            self.assertNotIn("unsafe", files[0].name)
+            self.assertEqual(os.stat(files[0]).st_mode & 0o777, 0o600)
+            self.assertEqual(json.loads(files[0].read_text())["sessionId"], "../../unsafe/session")
+            self.assertEqual(state["task"], "test atomic output")
+
+    def test_new_hook_transition_resets_previous_read_receipt_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = HOOK.update_state("codex", {
+                "hook_event_name": "Stop", "session_id": "s2", "cwd": "/work/repo",
+            }, root)
+            state_file = next(root.glob("*.json"))
+            first["unread"] = False
+            first["readAt"] = "2026-08-17T00:00:00Z"
+            HOOK.atomic_write(state_file, first)
+
+            next_state = HOOK.update_state("codex", {
+                "hook_event_name": "PermissionRequest", "session_id": "s2", "cwd": "/work/repo",
+            }, root)
+            self.assertTrue(next_state["unread"])
+            self.assertIsNone(next_state["readAt"])
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const vscode = require('vscode');
+const { scanIdeContexts } = require('./ide-context');
 const {
   matchesWorkspace,
   latestTurnLifecycle,
@@ -93,7 +94,8 @@ class AgentStatusController {
       try {
         const state = JSON.parse(await fs.promises.readFile(filePath, 'utf8'));
         if (state && state.version === 1 && state.source && state.sessionId) {
-          states.push(await this.reconcileState({ ...state, _filePath: filePath }));
+          const withReceipt = await this.applyReadReceipt({ ...state, _filePath: filePath });
+          states.push(await this.reconcileState(withReceipt));
         }
       } catch (error) {
         if (error.code !== 'ENOENT') console.warn(`Agent Status: ignoring ${filePath}.`, error);
@@ -113,30 +115,9 @@ class AgentStatusController {
     const owned = new Set();
     const live = new Set();
     try {
-      const entries = await fs.promises.readdir('/proc', { withFileTypes: true });
-      await Promise.all(entries
-        .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
-        .map(async (entry) => {
-          const procDir = path.join('/proc', entry.name);
-          try {
-            const [commandBuffer, stat, environmentBuffer] = await Promise.all([
-              fs.promises.readFile(path.join(procDir, 'cmdline')),
-              fs.promises.readFile(path.join(procDir, 'stat'), 'utf8'),
-              fs.promises.readFile(path.join(procDir, 'environ')),
-            ]);
-            const command = commandBuffer.toString('utf8').replaceAll('\0', ' ');
-            if (!command.includes('codex') || !command.includes('app-server')) return;
-            const contextEntry = environmentBuffer.toString('utf8').split('\0')
-              .find((value) => value.startsWith('VSCODE_IPC_HOOK_CLI='));
-            if (!contextEntry) return;
-            const contextId = contextEntry.slice('VSCODE_IPC_HOOK_CLI='.length);
-            if (!contextId) return;
-            live.add(contextId);
-            const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
-            const parentPid = Number(fields[1]);
-            if (parentPid === process.pid) owned.add(contextId);
-          } catch (_) { /* processes may exit or hide their environment while scanning */ }
-        }));
+      const scanned = await scanIdeContexts('/proc', process.pid);
+      for (const contextId of scanned.owned) owned.add(contextId);
+      for (const contextId of scanned.live) live.add(contextId);
     } catch (error) {
       console.warn('Agent Status: cannot inspect Codex IDE processes.', error);
       return;
@@ -165,6 +146,28 @@ class AgentStatusController {
     }
     const staleMinutes = this.configuration().get('staleAfterMinutes', 30);
     return withStaleStatus(state, Date.now(), staleMinutes * 60_000);
+  }
+
+  readReceiptPath(state) {
+    return `${state._filePath}.read`;
+  }
+
+  async applyReadReceipt(state) {
+    if (!state.unread) return state;
+    try {
+      const receipt = JSON.parse(await fs.promises.readFile(this.readReceiptPath(state), 'utf8'));
+      if (
+        receipt.version === 1
+        && receipt.source === state.source
+        && receipt.sessionId === state.sessionId
+        && receipt.stateUpdatedAt === state.updatedAt
+      ) {
+        return { ...state, unread: false, readAt: receipt.readAt };
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') console.warn('Agent Status: ignoring invalid read receipt.', error);
+    }
+    return state;
   }
 
   async readFileTail(filePath, maxBytes = 128 * 1024) {
@@ -243,7 +246,11 @@ class AgentStatusController {
   async markSelectedRead(terminalOnly = false) {
     if (!vscode.window.state.focused) return;
     const selected = this.selectedState();
-    if (terminalOnly && !selected?.terminalTty) return;
+    if (terminalOnly) {
+      if (!selected?.terminalTty) return;
+      const terminal = await this.terminalForState(selected);
+      if (!terminal || terminal !== vscode.window.activeTerminal) return;
+    }
     if (!selected?.unread) return;
     await this.markStateRead(selected);
     await this.refresh();
@@ -251,14 +258,20 @@ class AgentStatusController {
 
   async markStateRead(state) {
     const readAt = new Date().toISOString();
-    const updated = { ...state, unread: false, readAt };
-    delete updated._filePath;
-    const temporary = `${state._filePath}.${process.pid}.tmp`;
+    const receiptPath = this.readReceiptPath(state);
+    const receipt = {
+      version: 1,
+      source: state.source,
+      sessionId: state.sessionId,
+      stateUpdatedAt: state.updatedAt,
+      readAt,
+    };
+    const temporary = `${receiptPath}.${process.pid}.tmp`;
     try {
-      await fs.promises.writeFile(temporary, `${JSON.stringify(updated, null, 2)}\n`, { mode: 0o600 });
-      await fs.promises.rename(temporary, state._filePath);
+      await fs.promises.writeFile(temporary, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
+      await fs.promises.rename(temporary, receiptPath);
     } catch (error) {
-      console.warn(`Agent Status: cannot mark ${state._filePath} read.`, error);
+      console.warn(`Agent Status: cannot write ${receiptPath}.`, error);
       try { await fs.promises.unlink(temporary); } catch (_) { /* ignore */ }
       return;
     }
@@ -351,7 +364,7 @@ class AgentStatusController {
         : state.source === 'codex' ? 'Codex IDE 会话' : '未关联集成终端', state.cwd]
         .filter(Boolean).join(' · '),
       state,
-    })), { placeHolder: '选择 session，并切换到它对应的集成终端' });
+    })), { placeHolder: '选择 session；终端会话将切换终端，IDE 会话将打开侧栏' });
     if (!picked?.state) return;
     await this.pinState(picked.state);
     this.render();
@@ -368,6 +381,9 @@ class AgentStatusController {
     await Promise.all(targets.map(async (state) => {
       try { await fs.promises.unlink(state._filePath); } catch (error) {
         if (error.code !== 'ENOENT') console.warn(`Agent Status: cannot remove ${state._filePath}.`, error);
+      }
+      try { await fs.promises.unlink(this.readReceiptPath(state)); } catch (error) {
+        if (error.code !== 'ENOENT') console.warn(`Agent Status: cannot remove read receipt.`, error);
       }
     }));
     await this.refresh();
@@ -403,4 +419,4 @@ async function activate(context) {
 
 function deactivate() {}
 
-module.exports = { activate, deactivate };
+module.exports = { AgentStatusController, activate, deactivate };
