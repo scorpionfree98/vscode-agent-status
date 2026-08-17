@@ -1,0 +1,7 @@
+.git/**
+.github/**
+test/**
+*.vsix
+node_modules/**
+**/__pycache__/**
+**/*.pyc

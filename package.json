@@ -1,0 +1,75 @@
+{
+  "name": "vscode-agent-status",
+  "displayName": "Agent Status for Codex & Claude Code",
+  "description": "Shows Codex and Claude Code task status and marks notifications read when you return to VS Code.",
+  "version": "0.1.0",
+  "publisher": "kmkuang-local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "codex",
+    "claude-code",
+    "status",
+    "notification",
+    "read-receipt"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentStatus.markRead",
+        "title": "Agent Status: Mark Relevant Tasks Read"
+      },
+      {
+        "command": "agentStatus.showTasks",
+        "title": "Agent Status: Show Tasks"
+      },
+      {
+        "command": "agentStatus.clearReadCompleted",
+        "title": "Agent Status: Clear Read Completed Tasks"
+      }
+    ],
+    "configuration": {
+      "title": "Agent Status",
+      "properties": {
+        "agentStatus.stateDirectory": {
+          "type": "string",
+          "default": "~/.agent-status",
+          "description": "Directory containing task state JSON files. A leading ~ expands to the remote extension host home directory."
+        },
+        "agentStatus.markReadDelayMs": {
+          "type": "number",
+          "default": 1200,
+          "minimum": 0,
+          "description": "Delay before unread tasks are marked read while the VS Code window is focused."
+        },
+        "agentStatus.renameActiveTerminal": {
+          "type": "boolean",
+          "default": true,
+          "description": "Rename the active integrated terminal when an agent state changes or is marked read."
+        },
+        "agentStatus.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the most relevant agent task in the VS Code status bar."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "package": "npx --yes @vscode/vsce package --allow-missing-repository"
+  }
+}
+
