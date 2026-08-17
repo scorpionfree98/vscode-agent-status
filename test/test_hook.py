@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "agent-status-hook.py"
@@ -49,7 +50,26 @@ class HookTests(unittest.TestCase):
         self.assertEqual(status, "waiting_permission")
         self.assertTrue(unread)
 
+    def test_terminal_tty_is_recorded_and_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with mock.patch.object(HOOK, "controlling_tty", return_value="/dev/pts/42"):
+                started = HOOK.update_state("codex", {
+                    "hook_event_name": "UserPromptSubmit",
+                    "session_id": "tty-session",
+                    "cwd": "/work/repo",
+                    "prompt": "终端绑定",
+                }, root)
+            self.assertEqual(started["terminalTty"], "/dev/pts/42")
+
+            with mock.patch.object(HOOK, "controlling_tty", return_value=""):
+                completed = HOOK.update_state("codex", {
+                    "hook_event_name": "Stop",
+                    "session_id": "tty-session",
+                    "cwd": "/work/repo",
+                }, root)
+            self.assertEqual(completed["terminalTty"], "/dev/pts/42")
+
 
 if __name__ == "__main__":
     unittest.main()
-

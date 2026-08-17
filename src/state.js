@@ -59,6 +59,25 @@ function selectMostRelevant(states, workspaceRoots) {
     })[0];
 }
 
+function stateKey(state) {
+  return state ? `${state.source}:${state.sessionId}` : undefined;
+}
+
+function selectPinned(states, workspaceRoots, pinnedKey) {
+  const relevant = states.filter((state) => matchesWorkspace(state, workspaceRoots));
+  const pinned = pinnedKey
+    ? relevant.find((state) => stateKey(state) === pinnedKey)
+    : undefined;
+  return pinned || selectMostRelevant(relevant, []);
+}
+
+function selectForTty(states, workspaceRoots, tty) {
+  if (!tty) return undefined;
+  return states
+    .filter((state) => matchesWorkspace(state, workspaceRoots) && state.terminalTty === tty)
+    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0];
+}
+
 function terminalTitle(state, readOverride = false) {
   const read = readOverride || state.unread === false;
   let status = statusLabel(state.status);
@@ -82,10 +101,12 @@ function statusBarText(state) {
 module.exports = {
   isPathInside,
   matchesWorkspace,
+  selectForTty,
   selectMostRelevant,
+  selectPinned,
   sourceLabel,
+  stateKey,
   statusBarText,
   statusLabel,
   terminalTitle,
 };
-

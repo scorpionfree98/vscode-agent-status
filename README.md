@@ -7,9 +7,12 @@
 - 状态栏显示 Agent、任务简称和当前状态。
 - 支持 `运行中`、`等待授权`、`等待输入`、`已完成`。
 - 等待参与或完成时标记为未读。
-- 切回对应工作区的 VS Code 窗口，或切换到终端标签后自动标记已读。状态文件刷新本身不会自动确认已读。
-- 可选重命名当前集成终端为 `Codex｜已读｜任务简称` 或 `Claude Code｜已读｜任务简称`。
-- 多会话按 Agent 类型和会话 ID 隔离。
+- 点击右下角状态可选择 session，并切换到它对应的 VS Code 集成终端。
+- 当前 session 会固定显示；其他后台 session 的状态变化不会再抢占右下角状态。
+- 手动切换集成终端时，会通过 TTY 反查并选中该终端中的 Codex/Claude Code session。
+- 切回 VS Code 或进入对应终端后，只把当前 session 标记已读，不影响其他 session。
+- 可选重命名匹配的集成终端为 `Codex｜已读｜任务简称` 或 `Claude Code｜已读｜任务简称`。
+- 多会话按 Agent 类型、会话 ID 和终端 TTY 隔离。没有 TTY 的 IDE 内置会话可以固定显示，但不能切换终端。
 
 ## 数据协议
 
@@ -17,7 +20,7 @@ Codex/Claude Code Hook 将状态原子写入远端主机的 `~/.agent-status/*.j
 
 ## 命令
 
-- `Agent Status: Mark Relevant Tasks Read`
+- `Agent Status: Mark Selected Task Read`
 - `Agent Status: Show Tasks`
 - `Agent Status: Clear Read Completed Tasks`
 

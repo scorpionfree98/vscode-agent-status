@@ -2,7 +2,7 @@
   "name": "vscode-agent-status",
   "displayName": "Agent Status for Codex & Claude Code",
   "description": "Shows Codex and Claude Code task status and marks notifications read when you return to VS Code.",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "publisher": "kmkuang-local",
   "license": "MIT",
   "engines": {
@@ -29,7 +29,7 @@
     "commands": [
       {
         "command": "agentStatus.markRead",
-        "title": "Agent Status: Mark Relevant Tasks Read"
+        "title": "Agent Status: Mark Selected Task Read"
       },
       {
         "command": "agentStatus.showTasks",
@@ -57,12 +57,12 @@
         "agentStatus.renameActiveTerminal": {
           "type": "boolean",
           "default": true,
-          "description": "Rename the active integrated terminal when an agent state changes or is marked read."
+          "description": "Rename an agent's matching integrated terminal when it is selected or marked read."
         },
         "agentStatus.showStatusBar": {
           "type": "boolean",
           "default": true,
-          "description": "Show the most relevant agent task in the VS Code status bar."
+          "description": "Show the selected agent session in the VS Code status bar."
         }
       }
     }

@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.2.0
+
+- Bind Codex and Claude Code sessions to integrated terminals by TTY.
+- Switch to a session's terminal from the status bar task picker.
+- Pin the selected session so background updates do not replace it.
+- Mark only the selected session read and select sessions when terminals change.
+
 ## 0.1.1
 
 - Keep new waiting/completed states unread while VS Code is already focused.

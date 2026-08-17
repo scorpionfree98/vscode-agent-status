@@ -75,6 +75,28 @@ def atomic_write(path: Path, value: dict[str, Any]) -> None:
             pass
 
 
+def controlling_tty() -> str:
+    """Return the terminal device that launched the hook, when one exists."""
+    try:
+        stat_fields = Path("/proc/self/stat").read_text(encoding="utf-8").rpartition(")")[2].split()
+        device = int(stat_fields[4])
+        if device == 0:
+            return ""
+        major = os.major(device)
+        minor = os.minor(device)
+        if 136 <= major <= 143:
+            candidate = f"/dev/pts/{(major - 136) * 256 + minor}"
+        elif major == 4:
+            candidate = f"/dev/tty{minor}"
+        else:
+            return ""
+        if os.stat(candidate).st_rdev == device:
+            return candidate
+    except (OSError, ValueError, IndexError):
+        return ""
+    return ""
+
+
 def event_status(source: str, data: dict[str, Any]) -> tuple[str | None, bool, str]:
     event = str(data.get("hook_event_name") or data.get("type") or "")
     tool = str(data.get("tool_name") or "")
@@ -122,6 +144,7 @@ def update_state(source: str, data: dict[str, Any], state_dir: Path) -> dict[str
     prompt = str(data.get("prompt") or "")
     task = compact_task(prompt) if prompt else str(previous.get("task") or "当前任务")
     cwd = str(data.get("cwd") or previous.get("cwd") or "")
+    terminal_tty = controlling_tty() or str(previous.get("terminalTty") or "")
     detail = re.sub(r"\s+", " ", detail).strip()
     if len(detail) > 240:
         detail = detail[:240].rstrip() + "…"
@@ -131,6 +154,7 @@ def update_state(source: str, data: dict[str, Any], state_dir: Path) -> dict[str
         "source": source,
         "sessionId": session_id,
         "cwd": cwd,
+        "terminalTty": terminal_tty or None,
         "task": task,
         "status": status,
         "unread": unread,
