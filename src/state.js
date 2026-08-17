@@ -12,6 +12,8 @@ const STATUS_LABELS = {
   waiting_permission: '等待授权',
   waiting_input: '等待输入',
   completed: '已完成',
+  interrupted: '已中断',
+  stale: '状态未知',
   session_ended: '会话结束',
 };
 
@@ -35,7 +37,23 @@ function matchesWorkspace(state, workspaceRoots) {
   if (!Array.isArray(workspaceRoots) || workspaceRoots.length === 0) {
     return true;
   }
-  return workspaceRoots.some((root) => isPathInside(state.cwd, root) || isPathInside(root, state.cwd));
+  return workspaceRoots.some((root) => isPathInside(state.cwd, root));
+}
+
+function matchesHost(
+  state,
+  currentHostPid,
+  liveHostPids = new Set(),
+  ownedIdeContexts = new Set(),
+  liveIdeContexts = new Set(),
+) {
+  if (state.ideContextId) {
+    if (ownedIdeContexts.has(state.ideContextId)) return true;
+    if (liveIdeContexts.has(state.ideContextId)) return false;
+  }
+  if (!state.hostPid) return true;
+  const hostPid = Number(state.hostPid);
+  return hostPid === Number(currentHostPid) || !liveHostPids.has(hostPid);
 }
 
 function relevanceScore(state) {
@@ -46,6 +64,8 @@ function relevanceScore(state) {
   else if (state.status === 'waiting_permission' || state.status === 'waiting_input') score += 400;
   else if (state.status === 'running') score += 300;
   else if (state.status === 'completed') score += 200;
+  else if (state.status === 'interrupted') score += 150;
+  else if (state.status === 'stale') score += 100;
   return score;
 }
 
@@ -78,6 +98,30 @@ function selectForTty(states, workspaceRoots, tty) {
     .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0];
 }
 
+function latestTurnLifecycle(text, afterTimestamp) {
+  let latest;
+  for (const line of String(text || '').split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const record = JSON.parse(line);
+      const event = record?.type === 'event_msg' ? record.payload?.type : undefined;
+      if (event !== 'turn_aborted') continue;
+      if (afterTimestamp && String(record.timestamp || '') <= String(afterTimestamp)) continue;
+      if (!latest || String(record.timestamp || '') > latest.timestamp) {
+        latest = { status: 'interrupted', timestamp: String(record.timestamp || '') };
+      }
+    } catch (_) { /* incomplete transcript line */ }
+  }
+  return latest;
+}
+
+function withStaleStatus(state, nowMs, staleAfterMs) {
+  if (state.status !== 'running' || !staleAfterMs) return state;
+  const updatedMs = Date.parse(state.updatedAt || '');
+  if (!Number.isFinite(updatedMs) || nowMs - updatedMs < staleAfterMs) return state;
+  return { ...state, status: 'stale', unread: false, detail: '长时间没有收到 Agent 状态更新' };
+}
+
 function terminalTitle(state, readOverride = false) {
   const read = readOverride || state.unread === false;
   let status = statusLabel(state.status);
@@ -94,12 +138,16 @@ function statusBarText(state) {
   if (state.unread) icon = '$(bell-dot)';
   else if (state.status === 'running') icon = '$(loading~spin)';
   else if (state.status === 'completed') icon = '$(check)';
+  else if (state.status === 'interrupted') icon = '$(debug-pause)';
+  else if (state.status === 'stale') icon = '$(clock)';
   else if (state.status === 'waiting_input' || state.status === 'waiting_permission') icon = '$(question)';
   return `${icon} ${sourceLabel(state.source)}: ${state.task || '当前任务'}`;
 }
 
 module.exports = {
   isPathInside,
+  latestTurnLifecycle,
+  matchesHost,
   matchesWorkspace,
   selectForTty,
   selectMostRelevant,
@@ -109,4 +157,5 @@ module.exports = {
   statusBarText,
   statusLabel,
   terminalTitle,
+  withStaleStatus,
 };

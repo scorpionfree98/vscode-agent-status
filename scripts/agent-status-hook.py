@@ -97,6 +97,29 @@ def controlling_tty() -> str:
     return ""
 
 
+def extension_host_pid(proc_root: Path = Path("/proc")) -> int | None:
+    """Find the VS Code extension host that owns an IDE-launched agent."""
+    pid = os.getppid()
+    for _ in range(20):
+        if pid <= 1:
+            return None
+        try:
+            command = (proc_root / str(pid) / "cmdline").read_bytes().replace(b"\0", b" ").decode()
+            stat_tail = (proc_root / str(pid) / "stat").read_text(encoding="utf-8").rpartition(")")[2].split()
+            if "bootstrap-fork" in command and "--type=extensionHost" in command:
+                return pid
+            pid = int(stat_tail[1])
+        except (OSError, ValueError, IndexError, UnicodeDecodeError):
+            return None
+    return None
+
+
+def ide_context_id() -> str | None:
+    """Identify the VS Code app-server instance that emitted this hook."""
+    value = os.environ.get("VSCODE_IPC_HOOK_CLI", "").strip()
+    return value or None
+
+
 def event_status(source: str, data: dict[str, Any]) -> tuple[str | None, bool, str]:
     event = str(data.get("hook_event_name") or data.get("type") or "")
     tool = str(data.get("tool_name") or "")
@@ -145,6 +168,9 @@ def update_state(source: str, data: dict[str, Any], state_dir: Path) -> dict[str
     task = compact_task(prompt) if prompt else str(previous.get("task") or "当前任务")
     cwd = str(data.get("cwd") or previous.get("cwd") or "")
     terminal_tty = controlling_tty() or str(previous.get("terminalTty") or "")
+    host_pid = extension_host_pid() or previous.get("hostPid")
+    context_id = ide_context_id() or previous.get("ideContextId")
+    transcript_path = str(data.get("transcript_path") or previous.get("transcriptPath") or "")
     detail = re.sub(r"\s+", " ", detail).strip()
     if len(detail) > 240:
         detail = detail[:240].rstrip() + "…"
@@ -155,10 +181,14 @@ def update_state(source: str, data: dict[str, Any], state_dir: Path) -> dict[str
         "sessionId": session_id,
         "cwd": cwd,
         "terminalTty": terminal_tty or None,
+        "hostPid": host_pid,
+        "ideContextId": context_id,
+        "transcriptPath": transcript_path or None,
         "task": task,
         "status": status,
         "unread": unread,
         "detail": detail,
+        "lastEvent": str(data.get("hook_event_name") or data.get("type") or ""),
         "updatedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
         # Every hook event is a fresh state transition. Running states are not
         # notifications, so they are neither unread nor previously "read".

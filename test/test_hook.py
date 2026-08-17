@@ -42,6 +42,25 @@ class HookTests(unittest.TestCase):
             saved = json.loads(next(root.glob("*.json")).read_text(encoding="utf-8"))
             self.assertEqual(saved["sessionId"], "s1")
 
+    def test_extension_host_pid_walks_process_ancestry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            proc = Path(directory)
+            for pid, parent, command in [
+                (20, 10, "sh -c hook"),
+                (10, 2, "node bootstrap-fork --type=extensionHost"),
+                (2, 1, "server-main"),
+            ]:
+                process = proc / str(pid)
+                process.mkdir()
+                (process / "cmdline").write_bytes(command.replace(" ", "\0").encode())
+                (process / "stat").write_text(f"{pid} (process) S {parent} 0 0 0 0", encoding="utf-8")
+            with mock.patch.object(HOOK.os, "getppid", return_value=20):
+                self.assertEqual(HOOK.extension_host_pid(proc), 10)
+
+    def test_ide_context_uses_vscode_ipc_socket(self):
+        with mock.patch.dict(HOOK.os.environ, {"VSCODE_IPC_HOOK_CLI": "/tmp/vscode-ipc.sock"}):
+            self.assertEqual(HOOK.ide_context_id(), "/tmp/vscode-ipc.sock")
+
     def test_claude_notification_needs_attention(self):
         status, unread, _ = HOOK.event_status("claude", {
             "hook_event_name": "Notification",

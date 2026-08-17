@@ -1,5 +1,13 @@
 # Change Log
 
+## 0.3.0
+
+- Bind Codex IDE sessions to their VS Code IPC context when available, with Extension Host and workspace fallbacks.
+- Keep pinned sessions stable across background updates and isolate nested workspaces in one direction.
+- Detect aborted Codex turns from transcripts and downgrade stale running states to unknown.
+- Avoid automatically marking IDE sessions read on window focus; terminal sessions still use focused-terminal read receipts.
+- Open the Codex sidebar for IDE sessions and switch terminals only for TTY-bound sessions.
+
 ## 0.2.0
 
 - Bind Codex and Claude Code sessions to integrated terminals by TTY.

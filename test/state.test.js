@@ -4,18 +4,59 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   isPathInside,
+  latestTurnLifecycle,
+  matchesHost,
   matchesWorkspace,
   selectForTty,
   selectMostRelevant,
   selectPinned,
   statusBarText,
   terminalTitle,
+  withStaleStatus,
 } = require('../src/state');
 
 test('matches nested workspace paths without prefix collisions', () => {
   assert.equal(isPathInside('/work/repo/subdir', '/work/repo'), true);
   assert.equal(isPathInside('/work/repository', '/work/repo'), false);
   assert.equal(matchesWorkspace({ cwd: '/work/repo/subdir' }, ['/work/repo']), true);
+  assert.equal(matchesWorkspace({ cwd: '/work/repo' }, ['/work/repo/subdir']), false);
+});
+
+test('host-bound live sessions stay in their owning VS Code window', () => {
+  const live = new Set([100, 200]);
+  assert.equal(matchesHost({ hostPid: 100 }, 100, live), true);
+  assert.equal(matchesHost({ hostPid: 200 }, 100, live), false);
+  assert.equal(matchesHost({ hostPid: 300 }, 100, live), true);
+  assert.equal(matchesHost({}, 100, live), true);
+});
+
+test('IDE context binding takes priority over host fallback', () => {
+  const liveContexts = new Set(['ipc-this', 'ipc-other']);
+  assert.equal(matchesHost(
+    { ideContextId: 'ipc-this' }, 100, new Set(), new Set(['ipc-this']), liveContexts,
+  ), true);
+  assert.equal(matchesHost(
+    { ideContextId: 'ipc-other' }, 100, new Set(), new Set(['ipc-this']), liveContexts,
+  ), false);
+  assert.equal(matchesHost(
+    { ideContextId: 'ipc-closed' }, 100, new Set(), new Set(['ipc-this']), liveContexts,
+  ), true);
+});
+
+test('detects aborted turns after the last hook update', () => {
+  const transcript = [
+    JSON.stringify({ timestamp: '2026-01-01T00:00:00Z', type: 'event_msg', payload: { type: 'turn_aborted' } }),
+    JSON.stringify({ timestamp: '2026-01-01T00:02:00Z', type: 'event_msg', payload: { type: 'turn_aborted' } }),
+  ].join('\n');
+  assert.deepEqual(latestTurnLifecycle(transcript, '2026-01-01T00:01:00Z'), {
+    status: 'interrupted', timestamp: '2026-01-01T00:02:00Z',
+  });
+});
+
+test('running sessions become stale after the configured threshold', () => {
+  const state = { status: 'running', unread: false, updatedAt: '2026-01-01T00:00:00Z' };
+  assert.equal(withStaleStatus(state, Date.parse('2026-01-01T00:29:00Z'), 30 * 60_000).status, 'running');
+  assert.equal(withStaleStatus(state, Date.parse('2026-01-01T00:31:00Z'), 30 * 60_000).status, 'stale');
 });
 
 test('pinned session is not replaced by a newer background session', () => {

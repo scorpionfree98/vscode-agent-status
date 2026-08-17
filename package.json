@@ -2,7 +2,7 @@
   "name": "vscode-agent-status",
   "displayName": "Agent Status for Codex & Claude Code",
   "description": "Shows Codex and Claude Code task status and marks notifications read when you return to VS Code.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "kmkuang-local",
   "license": "MIT",
   "engines": {
@@ -53,6 +53,12 @@
           "default": 1200,
           "minimum": 0,
           "description": "Delay before unread tasks are marked read while the VS Code window is focused."
+        },
+        "agentStatus.staleAfterMinutes": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "description": "Minutes without a hook update before a running session is shown as having unknown status."
         },
         "agentStatus.renameActiveTerminal": {
           "type": "boolean",
