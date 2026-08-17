@@ -136,7 +136,9 @@ def update_state(source: str, data: dict[str, Any], state_dir: Path) -> dict[str
         "unread": unread,
         "detail": detail,
         "updatedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "readAt": None if unread else previous.get("readAt"),
+        # Every hook event is a fresh state transition. Running states are not
+        # notifications, so they are neither unread nor previously "read".
+        "readAt": None,
     }
     atomic_write(path, state)
     return state
@@ -217,4 +219,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

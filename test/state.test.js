@@ -30,5 +30,6 @@ test('renders localized terminal and status bar titles', () => {
   assert.equal(terminalTitle(state), 'Codex｜已完成｜配置通知');
   assert.equal(terminalTitle(state, true), 'Codex｜已读｜配置通知');
   assert.match(statusBarText(state), /Codex: 配置通知/);
+  assert.equal(terminalTitle({ ...state, status: 'waiting_input', unread: true }), 'Codex｜等待输入｜配置通知');
+  assert.equal(terminalTitle({ ...state, status: 'waiting_input', unread: false }), 'Codex｜等待输入（已读）｜配置通知');
 });
-

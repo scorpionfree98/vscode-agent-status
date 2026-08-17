@@ -2,7 +2,7 @@
   "name": "vscode-agent-status",
   "displayName": "Agent Status for Codex & Claude Code",
   "description": "Shows Codex and Claude Code task status and marks notifications read when you return to VS Code.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "kmkuang-local",
   "license": "MIT",
   "engines": {
@@ -72,4 +72,3 @@
     "package": "npx --yes @vscode/vsce package --allow-missing-repository"
   }
 }
-

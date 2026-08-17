@@ -90,9 +90,6 @@ class AgentStatusController {
 
     this.states = states;
     this.render();
-    if (vscode.window.state.focused && this.relevantUnread().length > 0) {
-      this.scheduleMarkRead();
-    }
   }
 
   relevantStates() {
@@ -211,6 +208,9 @@ async function activate(context) {
     vscode.window.onDidChangeWindowState((state) => {
       if (state.focused) controller.scheduleMarkRead();
       else clearTimeout(controller.readTimer);
+    }),
+    vscode.window.onDidChangeActiveTerminal((terminal) => {
+      if (terminal && vscode.window.state.focused) controller.scheduleMarkRead();
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('agentStatus')) controller.refresh();
