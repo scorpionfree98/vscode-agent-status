@@ -5,7 +5,12 @@ const os = require('os');
 const path = require('path');
 const vscode = require('vscode');
 const { scanIdeContexts } = require('./ide-context');
+const { AgentSessionsProvider } = require('./session-tree');
+const { TerminalManager } = require('./terminal-manager');
 const {
+  compactLabel,
+  effectiveStatus,
+  isActionableState,
   matchesWorkspace,
   latestTurnLifecycle,
   matchesHost,
@@ -16,6 +21,7 @@ const {
   statusBarText,
   statusLabel,
   terminalTitle,
+  resumeCommand,
   withStaleStatus,
 } = require('./state');
 
@@ -27,11 +33,15 @@ class AgentStatusController {
     this.refreshTimer = undefined;
     this.readTimer = undefined;
     this.pollTimer = undefined;
+    this.refreshGeneration = 0;
     this.selectedStateKey = context.workspaceState.get('agentStatus.selectedStateKey');
     this.liveHostPids = new Set();
     this.ownedIdeContexts = new Set();
     this.liveIdeContexts = new Set();
     this.ideContextScannedAt = 0;
+    this.terminalManager = new TerminalManager(vscode);
+    this.resumeTerminals = new Map();
+    this.treeProvider = undefined;
     this.statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     this.statusBar.command = 'agentStatus.showTasks';
     this.context.subscriptions.push(this.statusBar);
@@ -78,6 +88,7 @@ class AgentStatusController {
   }
 
   async refresh() {
+    const generation = ++this.refreshGeneration;
     await this.refreshIdeContexts();
     const directory = this.stateDirectory();
     let names = [];
@@ -102,10 +113,22 @@ class AgentStatusController {
       }
     }
 
-    this.states = states;
-    this.liveHostPids = new Set(states
+    await this.terminalManager.refreshBindings();
+    if (generation !== this.refreshGeneration) {
+      this.scheduleRefresh();
+      return;
+    }
+    this.states = this.terminalManager.annotate(states);
+    this.liveHostPids = new Set(this.states
       .map((state) => Number(state.hostPid))
       .filter((pid) => pid && fs.existsSync(`/proc/${pid}`)));
+    const relevant = this.relevantStates();
+    await this.terminalManager.syncTitles(
+      relevant,
+      terminalTitle,
+      this.configuration().get('renameActiveTerminal', true),
+    );
+    this.treeProvider?.update(relevant);
     this.render();
   }
 
@@ -200,8 +223,11 @@ class AgentStatusController {
     ));
   }
 
-  selectedState() {
-    return selectPinned(this.relevantStates(), [], this.selectedStateKey);
+  selectedState(actionableOnly = false) {
+    const states = actionableOnly
+      ? this.relevantStates().filter(isActionableState)
+      : this.relevantStates();
+    return selectPinned(states, [], this.selectedStateKey);
   }
 
   async pinState(state) {
@@ -211,7 +237,7 @@ class AgentStatusController {
 
   render() {
     const visible = this.configuration().get('showStatusBar', true);
-    const selected = this.selectedState();
+    const selected = this.selectedState(true);
     if (!visible || !selected) {
       this.statusBar.hide();
       return;
@@ -227,7 +253,7 @@ class AgentStatusController {
 
   tooltip(selected) {
     const lines = [
-      `${sourceLabel(selected.source)}｜${statusLabel(selected.status)}${selected.unread ? '｜未读' : ''}`,
+      `${sourceLabel(selected.source)}｜${statusLabel(effectiveStatus(selected))}${selected.unread ? '｜未读' : ''}`,
       selected.task || '当前任务',
     ];
     if (selected.cwd) lines.push(selected.cwd);
@@ -276,47 +302,18 @@ class AgentStatusController {
       return;
     }
 
-    const terminal = await this.terminalForState(state);
-    if (terminal && terminal === vscode.window.activeTerminal) {
-      await this.renameTerminal(terminal, terminalTitle(state, true));
-    }
-  }
-
-  async renameTerminal(terminal, title) {
-    if (!terminal || !this.configuration().get('renameActiveTerminal', true)) return;
-    const previous = vscode.window.activeTerminal;
-    if (previous !== terminal) terminal.show(true);
-    try {
-      await vscode.commands.executeCommand('workbench.action.terminal.renameWithArg', { name: title });
-    } catch (error) {
-      console.warn('Agent Status: terminal rename command is unavailable.', error);
-    }
   }
 
   async terminalTty(terminal) {
-    if (!terminal) return undefined;
-    let pid;
-    try {
-      pid = await terminal.processId;
-    } catch (_) {
-      return undefined;
-    }
-    if (!pid) return undefined;
-    for (const descriptor of [0, 1, 2]) {
-      try {
-        const target = await fs.promises.readlink(`/proc/${pid}/fd/${descriptor}`);
-        if (target.startsWith('/dev/pts/') || target.startsWith('/dev/tty')) return target;
-      } catch (_) { /* descriptor may not exist */ }
-    }
-    return undefined;
+    return this.terminalManager.terminalTty(terminal);
   }
 
   async terminalForState(state) {
-    if (!state?.terminalTty) return undefined;
-    for (const terminal of vscode.window.terminals) {
-      if (await this.terminalTty(terminal) === state.terminalTty) return terminal;
-    }
-    return undefined;
+    let terminal = this.terminalManager.terminalForState(state);
+    if (terminal) return terminal;
+    await this.terminalManager.refreshBindings();
+    terminal = this.terminalManager.terminalForState(state);
+    return terminal;
   }
 
   async syncSelectionToActiveTerminal(terminal, markRead = true) {
@@ -333,13 +330,84 @@ class AgentStatusController {
     const terminal = await this.terminalForState(state);
     if (!terminal) return false;
     terminal.show(false);
-    await this.renameTerminal(terminal, terminalTitle(state));
     return true;
+  }
+
+  setTreeProvider(provider) {
+    this.treeProvider = provider;
+    provider.update(this.relevantStates());
+  }
+
+  stateFromArgument(argument) {
+    return argument?.state || argument;
+  }
+
+  async openSession(argument) {
+    const state = this.stateFromArgument(argument);
+    if (!state?.sessionId) return undefined;
+    await this.pinState(state);
+    this.render();
+    const opened = await this.openState(state);
+    if (opened && state.unread) await this.markStateRead(state);
+    await this.refresh();
+    if (!opened) vscode.window.showInformationMessage('该会话没有可打开的存活终端。');
+    return opened;
+  }
+
+  async resumeSession(argument) {
+    const state = this.stateFromArgument(argument);
+    if (!state?.sessionId) return undefined;
+    await this.pinState(state);
+    this.render();
+    if (await this.switchToState(state)) {
+      if (state.unread) await this.markStateRead(state);
+      await this.refresh();
+      return 'terminal';
+    }
+
+    const key = stateKey(state);
+    const pending = this.resumeTerminals.get(key);
+    if (pending && vscode.window.terminals.includes(pending)) {
+      pending.show(false);
+      return 'pending';
+    }
+    this.resumeTerminals.delete(key);
+
+    const command = resumeCommand(state);
+    if (!command) {
+      vscode.window.showErrorMessage('无法恢复：session ID 格式不安全或 Agent 类型不受支持。');
+      return undefined;
+    }
+    try {
+      const metadata = await fs.promises.stat(state.cwd);
+      if (!metadata.isDirectory()) throw new Error('工作目录不是文件夹');
+    } catch (error) {
+      vscode.window.showErrorMessage(`无法恢复：工作目录不可用 ${state.cwd || ''}`.trim());
+      return undefined;
+    }
+
+    const terminal = vscode.window.createTerminal({
+      name: `${sourceLabel(state.source)}｜${compactLabel(state.customName || state.task)}｜恢复中`,
+      cwd: state.cwd,
+    });
+    this.resumeTerminals.set(key, terminal);
+    terminal.show(false);
+    terminal.sendText(command, true);
+    if (state.unread) await this.markStateRead(state);
+    await this.refresh();
+    return 'created';
+  }
+
+  async markSessionRead(argument) {
+    const state = this.stateFromArgument(argument);
+    if (!state?.unread) return;
+    await this.markStateRead(state);
+    await this.refresh();
   }
 
   async openState(state) {
     if (await this.switchToState(state)) return 'terminal';
-    if (state.source === 'codex') {
+    if (state.source === 'codex' && !state.terminalTty) {
       try {
         await vscode.commands.executeCommand('chatgpt.openSidebar');
         return 'ide';
@@ -357,18 +425,20 @@ class AgentStatusController {
       return;
     }
     const picked = await vscode.window.showQuickPick(states.map((state) => ({
-      label: `${state.unread ? '$(bell-dot)' : '$(check)'} ${sourceLabel(state.source)}｜${statusLabel(state.status)}`,
+      label: `${state.unread ? '$(bell-dot)' : '$(check)'} ${sourceLabel(state.source)}｜${statusLabel(effectiveStatus(state))}`,
       description: state.task,
       detail: [state.terminalTty
-        ? `终端 ${state.terminalTty}`
+        ? `${state.terminalAlive === false ? '已关闭终端' : '终端'} ${state.terminalTty}`
         : state.source === 'codex' ? 'Codex IDE 会话' : '未关联集成终端', state.cwd]
         .filter(Boolean).join(' · '),
       state,
-    })), { placeHolder: '选择 session；终端会话将切换终端，IDE 会话将打开侧栏' });
+    })), { placeHolder: '选择 session；存活会话将切换，已关闭会话将恢复' });
     if (!picked?.state) return;
     await this.pinState(picked.state);
     this.render();
-    const opened = await this.openState(picked.state);
+    const opened = effectiveStatus(picked.state) === 'disconnected'
+      ? await this.resumeSession(picked.state)
+      : await this.openState(picked.state);
     if (picked.state.unread) await this.markStateRead(picked.state);
     await this.refresh();
     if (!opened) {
@@ -393,22 +463,37 @@ class AgentStatusController {
     clearTimeout(this.refreshTimer);
     clearTimeout(this.readTimer);
     if (this.watchHandle) this.watchHandle.close();
+    this.treeProvider?.dispose?.();
   }
 }
 
 async function activate(context) {
   const controller = new AgentStatusController(context);
+  const treeProvider = new AgentSessionsProvider(vscode);
+  controller.setTreeProvider(treeProvider);
   context.subscriptions.push(controller);
   context.subscriptions.push(
+    vscode.window.registerTreeDataProvider('agentStatus.sessionsView', treeProvider),
     vscode.commands.registerCommand('agentStatus.markRead', () => controller.markSelectedRead()),
     vscode.commands.registerCommand('agentStatus.showTasks', () => controller.showTasks()),
     vscode.commands.registerCommand('agentStatus.clearReadCompleted', () => controller.clearReadCompleted()),
+    vscode.commands.registerCommand('agentStatus.openSession', (item) => controller.openSession(item)),
+    vscode.commands.registerCommand('agentStatus.resumeSession', (item) => controller.resumeSession(item)),
+    vscode.commands.registerCommand('agentStatus.markSessionRead', (item) => controller.markSessionRead(item)),
+    vscode.commands.registerCommand('agentStatus.refreshSessions', () => controller.refresh()),
     vscode.window.onDidChangeWindowState((state) => {
       if (state.focused) controller.scheduleMarkRead(true);
       else clearTimeout(controller.readTimer);
     }),
     vscode.window.onDidChangeActiveTerminal((terminal) => {
       if (terminal) controller.syncSelectionToActiveTerminal(terminal);
+    }),
+    vscode.window.onDidOpenTerminal(() => controller.scheduleRefresh()),
+    vscode.window.onDidCloseTerminal((terminal) => {
+      for (const [key, candidate] of controller.resumeTerminals) {
+        if (candidate === terminal) controller.resumeTerminals.delete(key);
+      }
+      controller.scheduleRefresh();
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('agentStatus')) controller.refresh();

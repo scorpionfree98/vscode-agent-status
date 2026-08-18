@@ -1,5 +1,14 @@
 # Change Log
 
+## 0.4.0
+
+- Add an Agent Sessions activity-bar view grouped by attention, running, disconnected, and recent sessions.
+- Detect closed terminals from the current VS Code terminal-to-TTY map while preserving session history.
+- Resume closed Codex and Claude Code sessions in a new integrated terminal with duplicate and input guards.
+- Synchronize exact background terminal titles as `Agent｜Task｜Status` without stealing focus.
+- Keep read state separate from the terminal lifecycle status and remove competing hook-side OSC title writes.
+- Add lifecycle, tree view, resume safety, OSC naming, shell-title reset, and duplicate suppression tests.
+
 ## 0.3.2
 
 - Resolve Codex TUI sessions to their live terminal PID through the local Codex log index.

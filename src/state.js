@@ -15,6 +15,7 @@ const STATUS_LABELS = {
   interrupted: '已中断',
   stale: '状态未知',
   session_ended: '会话结束',
+  disconnected: '终端已关闭',
 };
 
 function sourceLabel(source) {
@@ -137,15 +138,55 @@ function withStaleStatus(state, nowMs, staleAfterMs) {
   return { ...state, status: 'stale', unread: false, detail: '长时间没有收到 Agent 状态更新' };
 }
 
-function terminalTitle(state, readOverride = false) {
-  const read = readOverride || state.unread === false;
-  let status = statusLabel(state.status);
-  if (read && state.status === 'completed') {
-    status = '已读';
-  } else if (read && (state.status === 'waiting_input' || state.status === 'waiting_permission')) {
-    status += '（已读）';
-  }
-  return `${sourceLabel(state.source)}｜${status}｜${state.task || '当前任务'}`;
+function compactLabel(value, maxLength = 48) {
+  const normalized = String(value || '')
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, ' ')
+    .replace(/｜/g, '·')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const characters = Array.from(normalized || '当前任务');
+  return characters.length > maxLength
+    ? `${characters.slice(0, Math.max(1, maxLength - 1)).join('')}…`
+    : characters.join('');
+}
+
+function effectiveStatus(state) {
+  return state.terminalTty && state.terminalAlive === false ? 'disconnected' : state.status;
+}
+
+function isActionableState(state) {
+  return !state.terminalTty || state.terminalAlive !== false;
+}
+
+function sessionGroup(state) {
+  const status = effectiveStatus(state);
+  if (
+    status === 'waiting_input'
+    || status === 'waiting_permission'
+    || (state.unread && status === 'completed')
+  ) return 'attention';
+  if (status === 'running') return 'running';
+  if (status === 'disconnected') return 'disconnected';
+  return 'recent';
+}
+
+function terminalTitle(state) {
+  return [
+    sourceLabel(state.source),
+    compactLabel(state.customName || state.task),
+    statusLabel(effectiveStatus(state)),
+  ].join('｜');
+}
+
+function isSafeSessionId(sessionId) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(sessionId || ''));
+}
+
+function resumeCommand(state) {
+  if (!isSafeSessionId(state?.sessionId)) return undefined;
+  if (state.source === 'codex') return `codex resume ${state.sessionId}`;
+  if (state.source === 'claude') return `claude --resume ${state.sessionId}`;
+  return undefined;
 }
 
 function statusBarText(state) {
@@ -161,16 +202,22 @@ function statusBarText(state) {
 
 module.exports = {
   isPathInside,
+  compactLabel,
+  effectiveStatus,
+  isActionableState,
+  isSafeSessionId,
   latestTurnLifecycle,
   matchesHost,
   matchesWorkspace,
   selectForTty,
   selectMostRelevant,
   selectPinned,
+  sessionGroup,
   sourceLabel,
   stateKey,
   statusBarText,
   statusLabel,
   terminalTitle,
+  resumeCommand,
   withStaleStatus,
 };

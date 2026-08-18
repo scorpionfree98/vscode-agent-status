@@ -3,6 +3,9 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
+  compactLabel,
+  effectiveStatus,
+  isActionableState,
   isPathInside,
   latestTurnLifecycle,
   matchesHost,
@@ -10,6 +13,8 @@ const {
   selectForTty,
   selectMostRelevant,
   selectPinned,
+  sessionGroup,
+  resumeCommand,
   statusBarText,
   terminalTitle,
   withStaleStatus,
@@ -99,9 +104,36 @@ test('unread waiting state outranks running and completed states', () => {
 
 test('renders localized terminal and status bar titles', () => {
   const state = { source: 'codex', status: 'completed', unread: true, task: '配置通知' };
-  assert.equal(terminalTitle(state), 'Codex｜已完成｜配置通知');
-  assert.equal(terminalTitle(state, true), 'Codex｜已读｜配置通知');
+  assert.equal(terminalTitle(state), 'Codex｜配置通知｜已完成');
   assert.match(statusBarText(state), /Codex: 配置通知/);
-  assert.equal(terminalTitle({ ...state, status: 'waiting_input', unread: true }), 'Codex｜等待输入｜配置通知');
-  assert.equal(terminalTitle({ ...state, status: 'waiting_input', unread: false }), 'Codex｜等待输入（已读）｜配置通知');
+  assert.equal(terminalTitle({ ...state, status: 'waiting_input', unread: true }), 'Codex｜配置通知｜等待输入');
+  assert.equal(terminalTitle({ ...state, status: 'waiting_input', unread: false }), 'Codex｜配置通知｜等待输入');
+});
+
+test('sanitizes terminal task labels and prefers custom names', () => {
+  assert.equal(compactLabel('  hello\n\x1b]0;bad｜title  '), 'hello ]0;bad·title');
+  const long = compactLabel('x'.repeat(60));
+  assert.equal(Array.from(long).length, 48);
+  assert.ok(long.endsWith('…'));
+  assert.equal(terminalTitle({
+    source: 'claude', status: 'running', task: 'generated', customName: '我的会话',
+  }), 'Claude Code｜我的会话｜运行中');
+});
+
+test('derives disconnected lifecycle without overwriting the hook status', () => {
+  const state = { status: 'running', terminalTty: '/dev/pts/9', terminalAlive: false };
+  assert.equal(effectiveStatus(state), 'disconnected');
+  assert.equal(state.status, 'running');
+  assert.equal(isActionableState(state), false);
+  assert.equal(sessionGroup(state), 'disconnected');
+  assert.equal(sessionGroup({ status: 'completed', unread: true }), 'attention');
+  assert.equal(sessionGroup({ status: 'running', terminalAlive: true }), 'running');
+});
+
+test('builds only whitelisted resume commands for UUID sessions', () => {
+  const id = '01a00eb8-d86e-7520-a334-7d30dff8de92';
+  assert.equal(resumeCommand({ source: 'codex', sessionId: id }), `codex resume ${id}`);
+  assert.equal(resumeCommand({ source: 'claude', sessionId: id }), `claude --resume ${id}`);
+  assert.equal(resumeCommand({ source: 'codex', sessionId: 'x; rm -rf /' }), undefined);
+  assert.equal(resumeCommand({ source: 'unknown', sessionId: id }), undefined);
 });

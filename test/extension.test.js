@@ -8,6 +8,8 @@ const path = require('path');
 const test = require('node:test');
 
 const executedCommands = [];
+const createdTerminals = [];
+const errorMessages = [];
 const configuration = new Map();
 const defaultShowQuickPick = async () => undefined;
 const vscode = {
@@ -24,6 +26,22 @@ const vscode = {
     createStatusBarItem: () => ({ hide() {}, show() {}, dispose() {} }),
     onDidChangeActiveTerminal: () => ({ dispose() {} }),
     onDidChangeWindowState: () => ({ dispose() {} }),
+    onDidOpenTerminal: () => ({ dispose() {} }),
+    onDidCloseTerminal: () => ({ dispose() {} }),
+    registerTreeDataProvider: () => ({ dispose() {} }),
+    createTerminal: (options) => {
+      const terminal = {
+        options,
+        sent: [],
+        shown: 0,
+        show() { this.shown += 1; },
+        sendText(text, addNewLine) { this.sent.push({ text, addNewLine }); },
+      };
+      createdTerminals.push(terminal);
+      vscode.window.terminals.push(terminal);
+      return terminal;
+    },
+    showErrorMessage: async (message) => { errorMessages.push(message); },
     showInformationMessage: async () => undefined,
     showQuickPick: defaultShowQuickPick,
   },
@@ -64,6 +82,8 @@ async function temporaryState(value) {
 
 test.beforeEach(() => {
   executedCommands.length = 0;
+  createdTerminals.length = 0;
+  errorMessages.length = 0;
   configuration.clear();
   vscode.window.activeTerminal = undefined;
   vscode.window.terminals = [];
@@ -185,6 +205,50 @@ test('IDE session opens Codex sidebar while terminal session uses its terminal',
   assert.equal(await controller.openState({ source: 'codex' }), 'ide');
   assert.deepEqual(executedCommands.at(-1), ['chatgpt.openSidebar']);
   assert.equal(await controller.openState({ source: 'codex', terminalTty: '/dev/pts/1' }), 'terminal');
+});
+
+test('closed Codex terminal does not fall back to the unrelated IDE sidebar', async () => {
+  const controller = new AgentStatusController(context());
+  controller.switchToState = async () => false;
+  assert.equal(await controller.openState({ source: 'codex', terminalTty: '/dev/pts/9' }), undefined);
+  assert.equal(executedCommands.length, 0);
+});
+
+test('resume creates one terminal with a whitelisted command and suppresses duplicates', async () => {
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'agent-resume-test-'));
+  try {
+    const controller = new AgentStatusController(context());
+    controller.switchToState = async () => false;
+    const state = {
+      source: 'codex',
+      sessionId: '01a00eb8-d86e-7520-a334-7d30dff8de92',
+      task: '修复侧边栏',
+      cwd: directory,
+    };
+    assert.equal(await controller.resumeSession(state), 'created');
+    assert.equal(await controller.resumeSession(state), 'pending');
+    assert.equal(createdTerminals.length, 1);
+    assert.equal(createdTerminals[0].options.cwd, directory);
+    assert.equal(createdTerminals[0].options.name, 'Codex｜修复侧边栏｜恢复中');
+    assert.deepEqual(createdTerminals[0].sent, [{
+      text: 'codex resume 01a00eb8-d86e-7520-a334-7d30dff8de92', addNewLine: true,
+    }]);
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('resume rejects unsafe session IDs and missing working directories', async () => {
+  const controller = new AgentStatusController(context());
+  controller.switchToState = async () => false;
+  assert.equal(await controller.resumeSession({
+    source: 'claude', sessionId: 'bad; command', cwd: '/tmp',
+  }), undefined);
+  assert.equal(await controller.resumeSession({
+    source: 'claude', sessionId: '01a00eb8-d86e-7520-a334-7d30dff8de92', cwd: '/definitely/missing/path',
+  }), undefined);
+  assert.equal(createdTerminals.length, 0);
+  assert.equal(errorMessages.length, 2);
 });
 
 test('refresh loads only protocol states and merges an exact read receipt', async () => {

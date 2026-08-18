@@ -2,7 +2,7 @@
   "name": "vscode-agent-status",
   "displayName": "Agent Status for Codex & Claude Code",
   "description": "Shows Codex and Claude Code task status and marks notifications read when you return to VS Code.",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "publisher": "kmkuang-local",
   "license": "MIT",
   "engines": {
@@ -38,8 +38,71 @@
       {
         "command": "agentStatus.clearReadCompleted",
         "title": "Agent Status: Clear Read Completed Tasks"
+      },
+      {
+        "command": "agentStatus.openSession",
+        "title": "Agent Status: Open Session",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "agentStatus.resumeSession",
+        "title": "Agent Status: Resume Session",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "agentStatus.markSessionRead",
+        "title": "Agent Status: Mark Session Read",
+        "icon": "$(check)"
+      },
+      {
+        "command": "agentStatus.refreshSessions",
+        "title": "Agent Status: Refresh Sessions",
+        "icon": "$(refresh)"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentStatus",
+          "title": "Agent Sessions",
+          "icon": "media/agent-status.svg"
+        }
+      ]
+    },
+    "views": {
+      "agentStatus": [
+        {
+          "id": "agentStatus.sessionsView",
+          "name": "Codex & Claude Code"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "agentStatus.refreshSessions",
+          "when": "view == agentStatus.sessionsView",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "agentStatus.resumeSession",
+          "when": "view == agentStatus.sessionsView && viewItem == agentStatus.session.disconnected",
+          "group": "inline"
+        },
+        {
+          "command": "agentStatus.openSession",
+          "when": "view == agentStatus.sessionsView && (viewItem == agentStatus.session || viewItem == agentStatus.session.unread)",
+          "group": "inline"
+        },
+        {
+          "command": "agentStatus.markSessionRead",
+          "when": "view == agentStatus.sessionsView && viewItem == agentStatus.session.unread",
+          "group": "inline@2"
+        }
+      ]
+    },
     "configuration": {
       "title": "Agent Status",
       "properties": {
@@ -63,7 +126,7 @@
         "agentStatus.renameActiveTerminal": {
           "type": "boolean",
           "default": true,
-          "description": "Rename an agent's matching integrated terminal when it is selected or marked read."
+          "description": "Keep matching agent terminal names synchronized without changing terminal focus."
         },
         "agentStatus.showStatusBar": {
           "type": "boolean",

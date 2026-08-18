@@ -271,15 +271,6 @@ def terminal_title(state: dict[str, Any]) -> str:
     return f"{SOURCE_LABELS[state['source']]}｜{STATUS_LABELS[state['status']]}｜{state['task']}"
 
 
-def write_terminal_title(title: str) -> None:
-    try:
-        with open("/dev/tty", "w", encoding="utf-8", errors="ignore") as tty:
-            tty.write(f"\033]0;{title}\007")
-            tty.flush()
-    except OSError:
-        pass
-
-
 def webhook_url() -> str:
     configured = os.environ.get("CODEX_WEBHOOK_URL", "").strip()
     if configured:
@@ -331,7 +322,6 @@ def main() -> int:
     state_dir = Path(os.environ.get("AGENT_STATUS_DIR", "~/.agent-status")).expanduser()
     state = update_state(args.source, data, state_dir)
     if state:
-        write_terminal_title(terminal_title(state))
         if args.source == "codex":
             send_codex_webhook(state)
 
