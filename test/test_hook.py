@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -89,6 +90,58 @@ class HookTests(unittest.TestCase):
                     "cwd": "/work/repo",
                 }, root)
             self.assertEqual(completed["terminalTty"], "/dev/pts/42")
+
+    def test_codex_session_resolves_live_tui_pid_to_terminal_and_vscode_window(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "logs.sqlite"
+            connection = sqlite3.connect(database)
+            connection.execute(
+                "CREATE TABLE logs (thread_id TEXT, process_uuid TEXT, ts INTEGER)"
+            )
+            connection.executemany(
+                "INSERT INTO logs VALUES (?, ?, ?)",
+                [
+                    ("session-1", "pid:200:app-server", 20),
+                    ("session-1", "pid:100:tui", 10),
+                    ("other-session", "pid:300:tui", 30),
+                ],
+            )
+            connection.commit()
+            connection.close()
+
+            for pid, command, tty, ipc in [
+                (100, "codex", "/dev/pts/42", "/tmp/vscode-terminal.sock"),
+                (200, "codex app-server", None, "/tmp/vscode-app.sock"),
+                (300, "codex", "/dev/pts/99", "/tmp/vscode-other.sock"),
+            ]:
+                process = root / str(pid)
+                (process / "fd").mkdir(parents=True)
+                (process / "cmdline").write_bytes(command.encode())
+                (process / "environ").write_bytes(f"VSCODE_IPC_HOOK_CLI={ipc}\0".encode())
+                if tty:
+                    (process / "fd" / "0").symlink_to(tty)
+
+            self.assertEqual(
+                HOOK.session_terminal_context("session-1", database, root),
+                ("/dev/pts/42", "/tmp/vscode-terminal.sock"),
+            )
+
+    def test_session_terminal_context_rejects_reused_non_agent_pid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "logs.sqlite"
+            connection = sqlite3.connect(database)
+            connection.execute("CREATE TABLE logs (thread_id TEXT, process_uuid TEXT, ts INTEGER)")
+            connection.execute("INSERT INTO logs VALUES ('session-1', 'pid:100:old', 10)")
+            connection.commit()
+            connection.close()
+            process = root / "100"
+            (process / "fd").mkdir(parents=True)
+            (process / "cmdline").write_bytes(b"unrelated-process")
+            (process / "environ").write_bytes(b"")
+            (process / "fd" / "0").symlink_to("/dev/pts/42")
+            self.assertEqual(HOOK.session_terminal_context("session-1", database, root), ("", ""))
 
     def test_all_attention_and_lifecycle_events_have_expected_read_state(self):
         cases = [

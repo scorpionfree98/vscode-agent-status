@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -97,6 +98,73 @@ def controlling_tty() -> str:
     return ""
 
 
+def process_tty(pid: int, proc_root: Path = Path("/proc")) -> str:
+    """Return a live process's stdio TTY, rejecting PID reuse by non-agent processes."""
+    try:
+        command = (proc_root / str(pid) / "cmdline").read_bytes().replace(b"\0", b" ").decode()
+        if "codex" not in command and "claude" not in command:
+            return ""
+        for descriptor in (0, 1, 2):
+            try:
+                target = os.readlink(proc_root / str(pid) / "fd" / str(descriptor))
+                if target.startswith("/dev/pts/") or target.startswith("/dev/tty"):
+                    return target
+            except OSError:
+                continue
+    except (OSError, UnicodeDecodeError):
+        return ""
+    return ""
+
+
+def process_environment(pid: int, name: str, proc_root: Path = Path("/proc")) -> str:
+    try:
+        values = (proc_root / str(pid) / "environ").read_bytes().split(b"\0")
+        prefix = (name + "=").encode()
+        for value in values:
+            if value.startswith(prefix):
+                return value[len(prefix):].decode()
+    except (OSError, UnicodeDecodeError):
+        pass
+    return ""
+
+
+def session_terminal_context(
+    session_id: str,
+    logs_db: Path | None = None,
+    proc_root: Path = Path("/proc"),
+) -> tuple[str, str]:
+    """Resolve a Codex session to its live TUI process, TTY, and VS Code window."""
+    if not session_id:
+        return "", ""
+    database = logs_db or Path(os.environ.get("CODEX_LOG_DB", "~/.codex/logs_2.sqlite")).expanduser()
+    try:
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=0.2)
+        try:
+            rows = connection.execute(
+                """
+                SELECT process_uuid, MAX(ts) AS latest
+                FROM logs
+                WHERE thread_id = ? AND process_uuid LIKE 'pid:%'
+                GROUP BY process_uuid
+                ORDER BY latest DESC
+                """,
+                (session_id,),
+            )
+            for process_uuid, _ in rows:
+                match = re.match(r"pid:(\d+):", str(process_uuid))
+                if not match:
+                    continue
+                pid = int(match.group(1))
+                tty = process_tty(pid, proc_root)
+                if tty:
+                    return tty, process_environment(pid, "VSCODE_IPC_HOOK_CLI", proc_root)
+        finally:
+            connection.close()
+    except (OSError, sqlite3.Error):
+        pass
+    return "", ""
+
+
 def extension_host_pid(proc_root: Path = Path("/proc")) -> int | None:
     """Find the VS Code extension host that owns an IDE-launched agent."""
     pid = os.getppid()
@@ -167,9 +235,10 @@ def update_state(source: str, data: dict[str, Any], state_dir: Path) -> dict[str
     prompt = str(data.get("prompt") or "")
     task = compact_task(prompt) if prompt else str(previous.get("task") or "当前任务")
     cwd = str(data.get("cwd") or previous.get("cwd") or "")
-    terminal_tty = controlling_tty() or str(previous.get("terminalTty") or "")
+    session_tty, session_context = session_terminal_context(session_id) if source == "codex" else ("", "")
+    terminal_tty = controlling_tty() or session_tty or str(previous.get("terminalTty") or "")
     host_pid = extension_host_pid() or previous.get("hostPid")
-    context_id = ide_context_id() or previous.get("ideContextId")
+    context_id = ide_context_id() or session_context or previous.get("ideContextId")
     transcript_path = str(data.get("transcript_path") or previous.get("transcriptPath") or "")
     detail = re.sub(r"\s+", " ", detail).strip()
     if len(detail) > 240:

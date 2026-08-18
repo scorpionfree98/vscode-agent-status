@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.3.2
+
+- Resolve Codex TUI sessions to their live terminal PID through the local Codex log index.
+- Record the exact terminal TTY and VS Code IPC context even when hooks execute in the background app-server.
+- Reject stale PID reuse and add synthetic SQLite/process-tree regression tests.
+
 ## 0.3.1
 
 - Prevent window focus from marking a non-active terminal session read.

@@ -10,6 +10,7 @@
 - 点击右下角状态可选择 session；终端会话切换到对应终端，Codex IDE 会话打开 Codex 侧栏。
 - 当前 session 会固定显示；其他后台 session 的状态变化不会再抢占右下角状态。
 - 手动切换集成终端时，会通过 TTY 反查并选中该终端中的 Codex/Claude Code session。
+- Codex TUI 使用后台 app-server 执行 Hook 时，会通过本地 Codex 日志索引反查当前 session 的终端 PID 和 TTY。
 - 切回 VS Code 后只会自动读取当前终端对应的 session；IDE 会话必须在任务列表中点击，或执行显式已读命令，避免误读其他会话。
 - 可选重命名匹配的集成终端为 `Codex｜已读｜任务简称` 或 `Claude Code｜已读｜任务简称`。
 - 多会话按 Agent 类型、会话 ID、终端 TTY 和 VS Code IDE 上下文隔离；工作区匹配只接受当前工作区内部启动的任务，避免父目录任务泄漏到子工作区。
