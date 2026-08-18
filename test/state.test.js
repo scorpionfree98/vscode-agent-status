@@ -149,8 +149,26 @@ test('builds only whitelisted resume commands for UUID sessions', () => {
     resumeCommand({ source: 'codex', sessionId: id }, { codex: 'codex-sp-happy' }),
     `codex-sp-happy resume ${id}`,
   );
+  assert.equal(
+    resumeCommand(
+      { source: 'codex', sessionId: id, launchProfile: 'happy' },
+      { codex: 'codex', codexProfiles: { happy: 'codex-sp-happy' } },
+    ),
+    `codex-sp-happy resume ${id}`,
+  );
+  assert.equal(
+    resumeCommand(
+      { source: 'codex', sessionId: id },
+      { codex: 'codex', codexProfiles: { happy: 'codex-sp-happy' }, defaultCodexProfile: 'happy' },
+    ),
+    `codex-sp-happy resume ${id}`,
+  );
   assert.equal(resumeCommand({ source: 'claude', sessionId: id }), `claude --resume ${id}`);
   assert.equal(resumeCommand({ source: 'codex', sessionId: 'x; rm -rf /' }), undefined);
   assert.equal(resumeCommand({ source: 'codex', sessionId: id }, { codex: 'codex;bad' }), undefined);
+  assert.equal(resumeCommand(
+    { source: 'codex', sessionId: id, launchProfile: 'unsafe profile' },
+    { codex: 'codex', codexProfiles: { 'unsafe profile': 'bad;command' } },
+  ), `codex resume ${id}`);
   assert.equal(resumeCommand({ source: 'unknown', sessionId: id }), undefined);
 });

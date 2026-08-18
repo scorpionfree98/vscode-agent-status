@@ -16,6 +16,73 @@ SPEC.loader.exec_module(HOOK)
 
 
 class HookTests(unittest.TestCase):
+    def test_registered_launch_is_claimed_by_exact_resume_session(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            launch_id = HOOK.register_codex_launch(
+                root,
+                terminal_tty="/dev/pts/36",
+                cwd="/work/repo",
+                ide_context_id="/tmp/vscode.sock",
+                shell_pid=os.getpid(),
+                launch_profile="happy",
+                requested_session_id="01a0136e-982d-7020-b851-6638314d1341",
+            )
+            self.assertRegex(launch_id, r"^[0-9a-f]{32}$")
+            context = HOOK.registered_launch_context(
+                root, "01a0136e-982d-7020-b851-6638314d1341", "/other/cwd"
+            )
+            self.assertEqual(context["terminalTty"], "/dev/pts/36")
+            self.assertEqual(context["ideContextId"], "/tmp/vscode.sock")
+            self.assertEqual(context["launchProfile"], "happy")
+
+            HOOK.finish_codex_launch(root, launch_id, 130)
+            saved = json.loads((root / "launches" / f"{launch_id}.json").read_text())
+            self.assertFalse(saved["active"])
+            self.assertEqual(saved["exitCode"], 130)
+
+    def test_unbound_launch_claim_requires_one_live_candidate_for_cwd(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = HOOK.register_codex_launch(
+                root, terminal_tty="/dev/pts/1", cwd="/work/repo",
+                ide_context_id="one", shell_pid=os.getpid(), launch_profile="one",
+            )
+            context = HOOK.registered_launch_context(root, "new-session", "/work/repo")
+            self.assertEqual(context["launchProfile"], "one")
+            HOOK.finish_codex_launch(root, first, 0)
+
+            for tty, profile in (("/dev/pts/2", "two"), ("/dev/pts/3", "three")):
+                HOOK.register_codex_launch(
+                    root, terminal_tty=tty, cwd="/same/repo",
+                    ide_context_id=profile, shell_pid=os.getpid(), launch_profile=profile,
+                )
+            self.assertEqual(HOOK.registered_launch_context(root, "ambiguous", "/same/repo"), {})
+
+    def test_hook_state_uses_registered_terminal_and_profile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session_id = "01a0136e-982d-7020-b851-6638314d1341"
+            HOOK.register_codex_launch(
+                root, terminal_tty="/dev/pts/36", cwd="/work/repo",
+                ide_context_id="/tmp/vscode.sock", shell_pid=os.getpid(),
+                launch_profile="happy", requested_session_id=session_id,
+            )
+            with mock.patch.object(HOOK, "controlling_tty", return_value=""), \
+                    mock.patch.object(HOOK, "session_terminal_context", return_value=("", "")), \
+                    mock.patch.object(HOOK, "extension_host_pid", return_value=None), \
+                    mock.patch.object(HOOK, "ide_context_id", return_value=None):
+                state = HOOK.update_state("codex", {
+                    "hook_event_name": "UserPromptSubmit",
+                    "session_id": session_id,
+                    "cwd": "/work/repo",
+                    "prompt": "tracked",
+                }, root)
+            self.assertEqual(state["terminalTty"], "/dev/pts/36")
+            self.assertEqual(state["surface"], "terminal")
+            self.assertEqual(state["ideContextId"], "/tmp/vscode.sock")
+            self.assertEqual(state["launchProfile"], "happy")
+
     def test_compact_task(self):
         self.assertEqual(HOOK.compact_task("请帮我配置 Codex 通知"), "配置 Codex 通知")
 

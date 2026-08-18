@@ -1,5 +1,13 @@
 # Change Log
 
+## 0.5.0
+
+- Add a shell launch registry that binds Codex sessions to the originating TTY and VS Code IPC context even when hooks run in a shared app-server.
+- Capture a safe launch Profile name per session without persisting proxy credentials or the complete process environment.
+- Resolve Codex resume launchers by session Profile, default Profile, configured command, then the built-in `codex` fallback.
+- Require exact resume-session matches or a single live unclaimed launch in the same working directory to prevent cross-terminal switches.
+- Wrap local interactive `codex` launches in `.bashrc` and tag proxy, happy, and direct aliases with distinct Profiles.
+
 ## 0.4.1
 
 - Classify Codex sessions explicitly as integrated-terminal or IDE sessions so historical CLI records no longer open the unrelated Codex client.

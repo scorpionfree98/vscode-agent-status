@@ -2,7 +2,7 @@
   "name": "vscode-agent-status",
   "displayName": "Agent Status for Codex & Claude Code",
   "description": "Shows Codex and Claude Code task status and marks notifications read when you return to VS Code.",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "publisher": "kmkuang-local",
   "license": "MIT",
   "engines": {
@@ -133,6 +133,21 @@
           "default": "codex",
           "pattern": "^[A-Za-z0-9_./:+-]+$",
           "description": "Codex terminal launcher used for resume, for example codex or codex-sp-happy. Arguments are not accepted; put persistent arguments in a shell alias or wrapper."
+        },
+        "agentStatus.codexProfiles": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_./:+-]+$"
+          },
+          "description": "Map captured Codex launch profile names to safe shell launchers, for example happy to codex-sp-happy."
+        },
+        "agentStatus.defaultCodexProfile": {
+          "type": "string",
+          "default": "",
+          "pattern": "^$|^[A-Za-z0-9_.-]{1,64}$",
+          "description": "Fallback Codex launch profile when a session has no captured profile."
         },
         "agentStatus.claudeCommand": {
           "type": "string",

@@ -376,6 +376,8 @@ class AgentStatusController {
 
     const command = resumeCommand(state, {
       codex: this.configuration().get('codexCommand', 'codex'),
+      codexProfiles: this.configuration().get('codexProfiles', {}),
+      defaultCodexProfile: this.configuration().get('defaultCodexProfile', ''),
       claude: this.configuration().get('claudeCommand', 'claude'),
     });
     if (!command) {
@@ -433,7 +435,7 @@ class AgentStatusController {
       description: state.task,
       detail: [state.terminalTty
         ? `${state.terminalAlive === false ? '已关闭终端' : '终端'} ${state.terminalTty}`
-        : state.source === 'codex' ? 'Codex IDE 会话' : '未关联集成终端', state.cwd]
+        : isIdeState(state) ? 'Codex IDE 会话' : '未关联集成终端', state.cwd]
         .filter(Boolean).join(' · '),
       state,
     })), { placeHolder: '选择 session；存活会话将切换，已关闭会话将恢复' });

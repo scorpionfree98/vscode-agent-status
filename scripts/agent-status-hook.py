@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import sqlite3
 import subprocess
 import sys
@@ -26,6 +27,8 @@ STATUS_LABELS = {
     "completed": "已完成",
     "session_ended": "会话结束",
 }
+PROFILE_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+TTY_PATTERN = re.compile(r"^/dev/(?:pts/\d+|tty\d+)$")
 
 
 def compact_task(prompt: str, limit: int = 26) -> str:
@@ -74,6 +77,117 @@ def atomic_write(path: Path, value: dict[str, Any]) -> None:
             os.unlink(temporary)
         except FileNotFoundError:
             pass
+
+
+def process_start_ticks(pid: int, proc_root: Path = Path("/proc")) -> int | None:
+    try:
+        fields = (proc_root / str(pid) / "stat").read_text(encoding="utf-8").rpartition(")")[2].split()
+        return int(fields[19])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def register_codex_launch(
+    state_dir: Path,
+    *,
+    terminal_tty: str,
+    cwd: str,
+    ide_context_id: str,
+    shell_pid: int,
+    launch_profile: str = "",
+    requested_session_id: str = "",
+    proc_root: Path = Path("/proc"),
+) -> str:
+    """Register terminal context before a Codex TUI starts."""
+    if not TTY_PATTERN.fullmatch(terminal_tty) or shell_pid <= 1:
+        return ""
+    profile = launch_profile if PROFILE_PATTERN.fullmatch(launch_profile) else ""
+    requested = requested_session_id if re.fullmatch(
+        r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", requested_session_id, re.I
+    ) else ""
+    launch_id = secrets.token_hex(16)
+    record = {
+        "version": 1,
+        "launchId": launch_id,
+        "active": True,
+        "startedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "shellPid": shell_pid,
+        "shellStartTicks": process_start_ticks(shell_pid, proc_root),
+        "terminalTty": terminal_tty,
+        "cwd": str(Path(cwd).resolve()),
+        "ideContextId": ide_context_id or None,
+        "launchProfile": profile or None,
+        "requestedSessionId": requested or None,
+        "sessionId": requested or None,
+    }
+    atomic_write(state_dir / "launches" / f"{launch_id}.json", record)
+    return launch_id
+
+
+def finish_codex_launch(state_dir: Path, launch_id: str, exit_code: int) -> None:
+    if not re.fullmatch(r"[0-9a-f]{32}", launch_id):
+        return
+    path = state_dir / "launches" / f"{launch_id}.json"
+    record = read_state(path)
+    if record.get("launchId") != launch_id:
+        return
+    record.update({
+        "active": False,
+        "endedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "exitCode": exit_code,
+    })
+    atomic_write(path, record)
+
+
+def _live_launch(record: dict[str, Any], proc_root: Path) -> bool:
+    try:
+        pid = int(record.get("shellPid"))
+    except (TypeError, ValueError):
+        return False
+    expected = record.get("shellStartTicks")
+    actual = process_start_ticks(pid, proc_root)
+    return actual is not None and (expected is None or actual == expected)
+
+
+def registered_launch_context(
+    state_dir: Path,
+    session_id: str,
+    cwd: str,
+    *,
+    proc_root: Path = Path("/proc"),
+) -> dict[str, Any]:
+    """Claim an exact or uniquely matching live terminal launch for a session."""
+    launches = state_dir / "launches"
+    records: list[tuple[Path, dict[str, Any]]] = []
+    for path in launches.glob("*.json") if launches.is_dir() else ():
+        record = read_state(path)
+        if not record.get("active") or not _live_launch(record, proc_root):
+            continue
+        if not TTY_PATTERN.fullmatch(str(record.get("terminalTty") or "")):
+            continue
+        records.append((path, record))
+
+    exact = [(path, record) for path, record in records if session_id in {
+        record.get("sessionId"), record.get("requestedSessionId"),
+    }]
+    candidates = exact
+    if not candidates:
+        normalized_cwd = str(Path(cwd).resolve()) if cwd else ""
+        candidates = [(path, record) for path, record in records
+                      if not record.get("sessionId") and record.get("cwd") == normalized_cwd]
+    if len(candidates) != 1:
+        return {}
+
+    path, record = candidates[0]
+    record["sessionId"] = session_id
+    record["claimedAt"] = dt.datetime.now(dt.timezone.utc).isoformat()
+    atomic_write(path, record)
+    return {
+        "launchId": record.get("launchId"),
+        "terminalTty": record.get("terminalTty"),
+        "ideContextId": record.get("ideContextId"),
+        "launchProfile": record.get("launchProfile"),
+    }
 
 
 def controlling_tty() -> str:
@@ -235,15 +349,28 @@ def update_state(source: str, data: dict[str, Any], state_dir: Path) -> dict[str
     prompt = str(data.get("prompt") or "")
     task = compact_task(prompt) if prompt else str(previous.get("task") or "当前任务")
     cwd = str(data.get("cwd") or previous.get("cwd") or "")
+    launch = registered_launch_context(state_dir, session_id, cwd) if source == "codex" else {}
     session_tty, session_context = session_terminal_context(session_id) if source == "codex" else ("", "")
-    terminal_tty = controlling_tty() or session_tty or str(previous.get("terminalTty") or "")
+    terminal_tty = (
+        controlling_tty()
+        or str(launch.get("terminalTty") or "")
+        or session_tty
+        or str(previous.get("terminalTty") or "")
+    )
     host_pid = extension_host_pid() or previous.get("hostPid")
     surface = (
         "terminal" if terminal_tty or source == "claude"
         else "ide" if host_pid
         else str(previous.get("surface") or "terminal")
     )
-    context_id = ide_context_id() or session_context or previous.get("ideContextId")
+    context_id = (
+        str(launch.get("ideContextId") or "")
+        or ide_context_id()
+        or session_context
+        or previous.get("ideContextId")
+    )
+    launch_profile = str(launch.get("launchProfile") or previous.get("launchProfile") or "")
+    launch_id = str(launch.get("launchId") or previous.get("launchId") or "")
     transcript_path = str(data.get("transcript_path") or previous.get("transcriptPath") or "")
     detail = re.sub(r"\s+", " ", detail).strip()
     if len(detail) > 240:
@@ -258,6 +385,8 @@ def update_state(source: str, data: dict[str, Any], state_dir: Path) -> dict[str
         "surface": surface,
         "hostPid": host_pid,
         "ideContextId": context_id,
+        "launchProfile": launch_profile or None,
+        "launchId": launch_id or None,
         "transcriptPath": transcript_path or None,
         "task": task,
         "status": status,
@@ -318,14 +447,39 @@ def send_codex_webhook(state: dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", choices=("codex", "claude"), required=True)
+    parser.add_argument("--source", choices=("codex", "claude"))
+    parser.add_argument("--register-codex-launch", action="store_true")
+    parser.add_argument("--finish-codex-launch")
+    parser.add_argument("--tty", default="")
+    parser.add_argument("--cwd", default="")
+    parser.add_argument("--ipc", default="")
+    parser.add_argument("--shell-pid", type=int, default=0)
+    parser.add_argument("--profile", default="")
+    parser.add_argument("--requested-session", default="")
+    parser.add_argument("--exit-code", type=int, default=0)
     args = parser.parse_args()
+    state_dir = Path(os.environ.get("AGENT_STATUS_DIR", "~/.agent-status")).expanduser()
+    if args.register_codex_launch:
+        print(register_codex_launch(
+            state_dir,
+            terminal_tty=args.tty,
+            cwd=args.cwd,
+            ide_context_id=args.ipc,
+            shell_pid=args.shell_pid,
+            launch_profile=args.profile,
+            requested_session_id=args.requested_session,
+        ))
+        return 0
+    if args.finish_codex_launch:
+        finish_codex_launch(state_dir, args.finish_codex_launch, args.exit_code)
+        return 0
+    if not args.source:
+        parser.error("--source is required for hook events")
     try:
         data = json.load(sys.stdin)
     except (ValueError, TypeError):
         data = {}
 
-    state_dir = Path(os.environ.get("AGENT_STATUS_DIR", "~/.agent-status")).expanduser()
     state = update_state(args.source, data, state_dir)
     if state:
         if args.source == "codex":

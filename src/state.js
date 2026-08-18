@@ -194,8 +194,15 @@ function isSafeSessionId(sessionId) {
 
 function resumeCommand(state, launchers = {}) {
   if (!isSafeSessionId(state?.sessionId)) return undefined;
+  const profiles = launchers.codexProfiles && typeof launchers.codexProfiles === 'object'
+    ? launchers.codexProfiles : {};
+  const sessionProfile = /^[A-Za-z0-9_.-]{1,64}$/.test(String(state?.launchProfile || ''))
+    ? String(state.launchProfile) : '';
+  const defaultProfile = /^[A-Za-z0-9_.-]{1,64}$/.test(String(launchers.defaultCodexProfile || ''))
+    ? String(launchers.defaultCodexProfile) : '';
+  const profileLauncher = profiles[sessionProfile] || profiles[defaultProfile];
   const launcher = state.source === 'codex'
-    ? String(launchers.codex || 'codex')
+    ? String(profileLauncher || launchers.codex || 'codex')
     : state.source === 'claude' ? String(launchers.claude || 'claude') : '';
   if (!/^[A-Za-z0-9_./:+-]+$/.test(launcher)) return undefined;
   if (state.source === 'codex') return `${launcher} resume ${state.sessionId}`;

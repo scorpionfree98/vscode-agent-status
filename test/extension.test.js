@@ -226,11 +226,14 @@ test('resume creates one terminal with a whitelisted command and suppresses dupl
   try {
     const controller = new AgentStatusController(context());
     controller.switchToState = async () => false;
-    configuration.set('codexCommand', 'codex-sp-happy');
+    configuration.set('codexCommand', 'codex');
+    configuration.set('codexProfiles', { happy: 'codex-sp-happy' });
+    configuration.set('defaultCodexProfile', 'happy');
     const state = {
       source: 'codex',
       sessionId: '01a00eb8-d86e-7520-a334-7d30dff8de92',
       task: '修复侧边栏',
+      launchProfile: 'happy',
       cwd: directory,
     };
     assert.equal(await controller.resumeSession(state), 'created');

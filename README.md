@@ -14,6 +14,7 @@
 - 真正关闭终端后，会话保留在侧边栏中，可一键在新的集成终端中恢复；Codex 和 Claude Code 的启动器均可配置。
 - 恢复前会检查现有终端和恢复中锁，避免同一 session 被重复启动。
 - Codex TUI 使用后台 app-server 执行 Hook 时，会通过本地 Codex 日志索引反查当前 session 的终端 PID 和 TTY。
+- 对 Codex 0.147+ 的共享 app-server 模式，可由 shell 包装器在启动前登记 TTY、工作目录、VS Code IPC 和启动 Profile；Hook 只认领精确恢复记录或同目录唯一候选，避免终端串线。
 - 切回 VS Code 后只会自动读取当前终端对应的 session；IDE 会话必须在任务列表中点击，或执行显式已读命令，避免误读其他会话。
 - 按精确 TTY 在后台同步终端名称，格式为 `Codex｜任务简称｜运行中`，不会为了改名抢占当前终端焦点。
 - 已读只是通知属性，不再把终端的真实状态从“已完成”改成“已读”。
@@ -45,6 +46,8 @@ Codex/Claude Code Hook 将状态原子写入远端主机的 `~/.agent-status/*.j
 - `agentStatus.staleAfterMinutes`：运行状态多久未更新后显示为状态未知，默认 30 分钟
 - `agentStatus.renameActiveTerminal`：是否按会话状态自动同步匹配终端的名称
 - `agentStatus.codexCommand`：恢复 Codex 会话所用的启动器，默认 `codex`；例如可设为 `codex-sp-happy`
+- `agentStatus.codexProfiles`：Profile 名称到安全启动器的映射，例如 `{ "happy": "codex-sp-happy" }`
+- `agentStatus.defaultCodexProfile`：Session 未捕获 Profile 时使用的默认 Profile
 - `agentStatus.claudeCommand`：恢复 Claude Code 会话所用的启动器，默认 `claude`
 - `agentStatus.showStatusBar`：是否显示状态栏项目
 
@@ -53,6 +56,8 @@ Codex/Claude Code Hook 将状态原子写入远端主机的 `~/.agent-status/*.j
 ```bash
 codex-sp-happy resume <session-id>
 ```
+
+本机的 `.bashrc` 使用统一 `codex()` 包装器调用 Hook 的 `--register-codex-launch` / `--finish-codex-launch` 模式，并让快捷方式通过 `AGENT_STATUS_PROFILE` 声明 Profile。状态文件只保存 Profile 名称，不复制代理地址、Token 或完整环境变量。恢复优先级为：Session Profile、默认 Profile、`agentStatus.codexCommand`、内置 `codex`。
 
 ## 构建
 
