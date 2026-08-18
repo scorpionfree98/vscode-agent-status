@@ -6,6 +6,7 @@ const {
   compactLabel,
   effectiveStatus,
   isActionableState,
+  isIdeState,
   isPathInside,
   latestTurnLifecycle,
   matchesHost,
@@ -103,7 +104,7 @@ test('unread waiting state outranks running and completed states', () => {
 });
 
 test('renders localized terminal and status bar titles', () => {
-  const state = { source: 'codex', status: 'completed', unread: true, task: '配置通知' };
+  const state = { source: 'codex', status: 'completed', unread: true, task: '配置通知', terminalAlive: true };
   assert.equal(terminalTitle(state), 'Codex｜配置通知｜已完成');
   assert.match(statusBarText(state), /Codex: 配置通知/);
   assert.equal(terminalTitle({ ...state, status: 'waiting_input', unread: true }), 'Codex｜配置通知｜等待输入');
@@ -116,7 +117,7 @@ test('sanitizes terminal task labels and prefers custom names', () => {
   assert.equal(Array.from(long).length, 48);
   assert.ok(long.endsWith('…'));
   assert.equal(terminalTitle({
-    source: 'claude', status: 'running', task: 'generated', customName: '我的会话',
+    source: 'claude', status: 'running', task: 'generated', customName: '我的会话', terminalAlive: true,
   }), 'Claude Code｜我的会话｜运行中');
 });
 
@@ -130,10 +131,26 @@ test('derives disconnected lifecycle without overwriting the hook status', () =>
   assert.equal(sessionGroup({ status: 'running', terminalAlive: true }), 'running');
 });
 
+test('treats historical Codex records as terminal sessions unless explicitly marked IDE', () => {
+  const historical = { source: 'codex', status: 'completed' };
+  const ide = { source: 'codex', surface: 'ide', status: 'completed' };
+  assert.equal(effectiveStatus(historical), 'disconnected');
+  assert.equal(isActionableState(historical), false);
+  assert.equal(isIdeState(historical), false);
+  assert.equal(effectiveStatus(ide), 'completed');
+  assert.equal(isActionableState(ide), true);
+  assert.equal(isIdeState(ide), true);
+});
+
 test('builds only whitelisted resume commands for UUID sessions', () => {
   const id = '01a00eb8-d86e-7520-a334-7d30dff8de92';
   assert.equal(resumeCommand({ source: 'codex', sessionId: id }), `codex resume ${id}`);
+  assert.equal(
+    resumeCommand({ source: 'codex', sessionId: id }, { codex: 'codex-sp-happy' }),
+    `codex-sp-happy resume ${id}`,
+  );
   assert.equal(resumeCommand({ source: 'claude', sessionId: id }), `claude --resume ${id}`);
   assert.equal(resumeCommand({ source: 'codex', sessionId: 'x; rm -rf /' }), undefined);
+  assert.equal(resumeCommand({ source: 'codex', sessionId: id }, { codex: 'codex;bad' }), undefined);
   assert.equal(resumeCommand({ source: 'unknown', sessionId: id }), undefined);
 });

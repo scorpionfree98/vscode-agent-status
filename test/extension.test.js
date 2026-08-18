@@ -202,7 +202,7 @@ test('IDE session opens Codex sidebar while terminal session uses its terminal',
   const controller = new AgentStatusController(context());
   controller.switchToState = async (state) => Boolean(state.terminalTty);
 
-  assert.equal(await controller.openState({ source: 'codex' }), 'ide');
+  assert.equal(await controller.openState({ source: 'codex', surface: 'ide' }), 'ide');
   assert.deepEqual(executedCommands.at(-1), ['chatgpt.openSidebar']);
   assert.equal(await controller.openState({ source: 'codex', terminalTty: '/dev/pts/1' }), 'terminal');
 });
@@ -214,11 +214,19 @@ test('closed Codex terminal does not fall back to the unrelated IDE sidebar', as
   assert.equal(executedCommands.length, 0);
 });
 
+test('historical Codex records without a surface never open the IDE client', async () => {
+  const controller = new AgentStatusController(context());
+  controller.switchToState = async () => false;
+  assert.equal(await controller.openState({ source: 'codex' }), undefined);
+  assert.equal(executedCommands.length, 0);
+});
+
 test('resume creates one terminal with a whitelisted command and suppresses duplicates', async () => {
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'agent-resume-test-'));
   try {
     const controller = new AgentStatusController(context());
     controller.switchToState = async () => false;
+    configuration.set('codexCommand', 'codex-sp-happy');
     const state = {
       source: 'codex',
       sessionId: '01a00eb8-d86e-7520-a334-7d30dff8de92',
@@ -231,7 +239,7 @@ test('resume creates one terminal with a whitelisted command and suppresses dupl
     assert.equal(createdTerminals[0].options.cwd, directory);
     assert.equal(createdTerminals[0].options.name, 'Codex｜修复侧边栏｜恢复中');
     assert.deepEqual(createdTerminals[0].sent, [{
-      text: 'codex resume 01a00eb8-d86e-7520-a334-7d30dff8de92', addNewLine: true,
+      text: 'codex-sp-happy resume 01a00eb8-d86e-7520-a334-7d30dff8de92', addNewLine: true,
     }]);
   } finally {
     await fs.promises.rm(directory, { recursive: true, force: true });

@@ -11,6 +11,7 @@ const {
   compactLabel,
   effectiveStatus,
   isActionableState,
+  isIdeState,
   matchesWorkspace,
   latestTurnLifecycle,
   matchesHost,
@@ -373,7 +374,10 @@ class AgentStatusController {
     }
     this.resumeTerminals.delete(key);
 
-    const command = resumeCommand(state);
+    const command = resumeCommand(state, {
+      codex: this.configuration().get('codexCommand', 'codex'),
+      claude: this.configuration().get('claudeCommand', 'claude'),
+    });
     if (!command) {
       vscode.window.showErrorMessage('无法恢复：session ID 格式不安全或 Agent 类型不受支持。');
       return undefined;
@@ -407,7 +411,7 @@ class AgentStatusController {
 
   async openState(state) {
     if (await this.switchToState(state)) return 'terminal';
-    if (state.source === 'codex' && !state.terminalTty) {
+    if (isIdeState(state)) {
       try {
         await vscode.commands.executeCommand('chatgpt.openSidebar');
         return 'ide';

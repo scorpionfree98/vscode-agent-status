@@ -238,6 +238,11 @@ def update_state(source: str, data: dict[str, Any], state_dir: Path) -> dict[str
     session_tty, session_context = session_terminal_context(session_id) if source == "codex" else ("", "")
     terminal_tty = controlling_tty() or session_tty or str(previous.get("terminalTty") or "")
     host_pid = extension_host_pid() or previous.get("hostPid")
+    surface = (
+        "terminal" if terminal_tty or source == "claude"
+        else "ide" if host_pid
+        else str(previous.get("surface") or "terminal")
+    )
     context_id = ide_context_id() or session_context or previous.get("ideContextId")
     transcript_path = str(data.get("transcript_path") or previous.get("transcriptPath") or "")
     detail = re.sub(r"\s+", " ", detail).strip()
@@ -250,6 +255,7 @@ def update_state(source: str, data: dict[str, Any], state_dir: Path) -> dict[str
         "sessionId": session_id,
         "cwd": cwd,
         "terminalTty": terminal_tty or None,
+        "surface": surface,
         "hostPid": host_pid,
         "ideContextId": context_id,
         "transcriptPath": transcript_path or None,

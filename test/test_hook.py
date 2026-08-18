@@ -82,6 +82,7 @@ class HookTests(unittest.TestCase):
                     "prompt": "终端绑定",
                 }, root)
             self.assertEqual(started["terminalTty"], "/dev/pts/42")
+            self.assertEqual(started["surface"], "terminal")
 
             with mock.patch.object(HOOK, "controlling_tty", return_value=""):
                 completed = HOOK.update_state("codex", {
@@ -90,6 +91,21 @@ class HookTests(unittest.TestCase):
                     "cwd": "/work/repo",
                 }, root)
             self.assertEqual(completed["terminalTty"], "/dev/pts/42")
+            self.assertEqual(completed["surface"], "terminal")
+
+    def test_codex_extension_host_session_is_marked_as_ide_surface(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(HOOK, "controlling_tty", return_value=""), \
+                    mock.patch.object(HOOK, "session_terminal_context", return_value=("", "")), \
+                    mock.patch.object(HOOK, "extension_host_pid", return_value=123):
+                state = HOOK.update_state("codex", {
+                    "hook_event_name": "UserPromptSubmit",
+                    "session_id": "ide-session",
+                    "cwd": "/work/repo",
+                    "prompt": "IDE task",
+                }, Path(directory))
+            self.assertEqual(state["surface"], "ide")
+            self.assertEqual(state["hostPid"], 123)
 
     def test_codex_session_resolves_live_tui_pid_to_terminal_and_vscode_window(self):
         with tempfile.TemporaryDirectory() as directory:

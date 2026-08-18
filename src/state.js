@@ -150,12 +150,22 @@ function compactLabel(value, maxLength = 48) {
     : characters.join('');
 }
 
+function isTerminalState(state) {
+  if (state?.surface === 'ide') return false;
+  if (state?.surface === 'terminal') return true;
+  return state?.source === 'codex' || state?.source === 'claude' || Boolean(state?.terminalTty);
+}
+
+function isIdeState(state) {
+  return state?.source === 'codex' && state?.surface === 'ide';
+}
+
 function effectiveStatus(state) {
-  return state.terminalTty && state.terminalAlive === false ? 'disconnected' : state.status;
+  return isTerminalState(state) && state.terminalAlive !== true ? 'disconnected' : state.status;
 }
 
 function isActionableState(state) {
-  return !state.terminalTty || state.terminalAlive !== false;
+  return !isTerminalState(state) || state.terminalAlive === true;
 }
 
 function sessionGroup(state) {
@@ -182,10 +192,14 @@ function isSafeSessionId(sessionId) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(sessionId || ''));
 }
 
-function resumeCommand(state) {
+function resumeCommand(state, launchers = {}) {
   if (!isSafeSessionId(state?.sessionId)) return undefined;
-  if (state.source === 'codex') return `codex resume ${state.sessionId}`;
-  if (state.source === 'claude') return `claude --resume ${state.sessionId}`;
+  const launcher = state.source === 'codex'
+    ? String(launchers.codex || 'codex')
+    : state.source === 'claude' ? String(launchers.claude || 'claude') : '';
+  if (!/^[A-Za-z0-9_./:+-]+$/.test(launcher)) return undefined;
+  if (state.source === 'codex') return `${launcher} resume ${state.sessionId}`;
+  if (state.source === 'claude') return `${launcher} --resume ${state.sessionId}`;
   return undefined;
 }
 
@@ -205,7 +219,9 @@ module.exports = {
   compactLabel,
   effectiveStatus,
   isActionableState,
+  isIdeState,
   isSafeSessionId,
+  isTerminalState,
   latestTurnLifecycle,
   matchesHost,
   matchesWorkspace,

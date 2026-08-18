@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.4.1
+
+- Classify Codex sessions explicitly as integrated-terminal or IDE sessions so historical CLI records no longer open the unrelated Codex client.
+- Treat closed and legacy Codex CLI sessions as resumable terminal sessions even when their old state lacks a TTY.
+- Add safe configurable Codex and Claude Code launchers for resume workflows, including shell aliases such as `codex-sp-happy`.
+- Configure the local installation to restore Codex sessions with `codex-sp-happy resume <session-id>`.
+
 ## 0.4.0
 
 - Add an Agent Sessions activity-bar view grouped by attention, running, disconnected, and recent sessions.
